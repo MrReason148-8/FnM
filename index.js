@@ -1,7 +1,7 @@
 const { Telegraf } = require('telegraf');
 require('dotenv').config();
-const { loadUserMemory, saveUserMemory, updateMemory, addToHistory, findUserByUsername } = require('./memory_manager');
-const { generateResponse } = require('./bot_logic');
+const { loadUserMemory, saveUserMemory, updateMemory, addToHistory, findUserByUsername, addGroupMessage, getAllGroups, saveGroupData } = require('./memory_manager');
+const { generateResponse, generateGroupSummary } = require('./bot_logic');
 
 if (!process.env.BOT_TOKEN) {
     console.error('Error: BOT_TOKEN is missing in .env');
@@ -13,7 +13,68 @@ const bot = new Telegraf(process.env.BOT_TOKEN);
 // Middleware to log incoming messages
 bot.use(async (ctx, next) => {
     // Basic permissions check or logging can go here
+    if (ctx.chat && (ctx.chat.type === 'group' || ctx.chat.type === 'supergroup')) {
+        // Track group existence simply by updating a file if message is received
+        // More robust is `my_chat_member` but this ensures we capture active groups too
+        if (ctx.message && ctx.message.text) {
+            const senderName = ctx.from.username || ctx.from.first_name;
+            addGroupMessage(ctx.chat.id, { sender: senderName, content: ctx.message.text });
+        }
+    }
     await next();
+});
+
+// Admin stats command
+bot.command('stats', async (ctx) => {
+    if (ctx.chat.type !== 'private' || ctx.from.id.toString() !== process.env.ADMIN_ID) {
+        return; // Ignore non-admins or non-private chats
+    }
+
+    const groups = getAllGroups();
+    const groupCount = groups.length;
+
+    await ctx.reply(`📊 Анализ групп (всего: ${groupCount})... подожди, читаю переписки...`);
+
+    let report = `📢 **Отчет по группам**\n\n`;
+
+    for (const group of groups) {
+        const summary = await generateGroupSummary(group.recent_messages);
+        report += `🔸 **Group ID:** ${group.id}\n**Сводка:** ${summary}\n\n`;
+    }
+
+    if (report.length > 4000) {
+        // Split if too long (basic split)
+        const parts = report.match(/[\s\S]{1,4000}/g) || [];
+        for (const part of parts) {
+            await ctx.reply(part, { parse_mode: 'Markdown' });
+        }
+    } else {
+        await ctx.reply(report, { parse_mode: 'Markdown' });
+    }
+});
+
+// Handle bot being added/removed from groups
+bot.on('my_chat_member', (ctx) => {
+    const chat = ctx.chat;
+    const newStatus = ctx.myChatMember.new_chat_member.status;
+    const adminId = process.env.ADMIN_ID;
+
+    if (newStatus === 'member' || newStatus === 'administrator') {
+        // Bot joined
+        saveGroupData(chat.id, {
+            id: chat.id,
+            title: chat.title,
+            members_count: 0,
+            recent_messages: [],
+            added_at: Date.now()
+        });
+        bot.telegram.sendMessage(adminId, `🔔 Меня добавили в группу:\n"${chat.title}" (ID: ${chat.id})`);
+    } else if (newStatus === 'left' || newStatus === 'kicked') {
+        // Bot left
+        // We might want to delete the file or just mark as inactive.
+        // For now, let's just notify.
+        bot.telegram.sendMessage(adminId, `👋 Меня удалили из группы:\n"${chat.title}" (ID: ${chat.id})`);
+    }
 });
 
 bot.start((ctx) => {

@@ -2,10 +2,14 @@ const fs = require('fs');
 const path = require('path');
 
 const DATA_DIR = path.join(__dirname, 'users_data');
+const GROUPS_DATA_DIR = path.join(__dirname, 'groups_data');
 
-// Ensure data directory exists
+// Ensure data directories exist
 if (!fs.existsSync(DATA_DIR)) {
     fs.mkdirSync(DATA_DIR);
+}
+if (!fs.existsSync(GROUPS_DATA_DIR)) {
+    fs.mkdirSync(GROUPS_DATA_DIR);
 }
 
 /**
@@ -20,7 +24,7 @@ function loadUserMemory(userId) {
             const data = fs.readFileSync(filePath, 'utf8');
             return JSON.parse(data);
         } catch (error) {
-            console.error(`Error reading memory for user ${userId}:`, error);
+            console.error(`Error reading memory for user ${userId}: `, error);
             // Backup corrupt file
             fs.renameSync(filePath, filePath + '.bak');
         }
@@ -47,7 +51,7 @@ function saveUserMemory(userId, data) {
     try {
         fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
     } catch (error) {
-        console.error(`Error saving memory for user ${userId}:`, error);
+        console.error(`Error saving memory for user ${userId}: `, error);
     }
 }
 
@@ -103,10 +107,90 @@ function findUserByUsername(username) {
                 return data;
             }
         } catch (e) {
-            console.error(`Error reading ${file} during search:`, e);
+            console.error(`Error reading ${file} during search: `, e);
         }
     }
     return null;
+}
+
+/**
+ * Loads group data from JSON file.
+ * @param {string|number} chatId 
+ * @returns {object} Group data object
+ */
+function loadGroupData(chatId) {
+    const filePath = path.join(GROUPS_DATA_DIR, `${chatId}.json`);
+    if (fs.existsSync(filePath)) {
+        try {
+            const data = fs.readFileSync(filePath, 'utf8');
+            return JSON.parse(data);
+        } catch (error) {
+            console.error(`Error reading group data for ${chatId}: `, error);
+        }
+    }
+
+    // Default group structure
+    return {
+        id: chatId,
+        title: 'Unknown Group',
+        members_count: 0,
+        recent_messages: [], // Store last ~50 messages for summary
+        added_at: Date.now()
+    };
+}
+
+/**
+ * Saves group data.
+ * @param {string|number} chatId 
+ * @param {object} data 
+ */
+function saveGroupData(chatId, data) {
+    const filePath = path.join(GROUPS_DATA_DIR, `${chatId}.json`);
+    try {
+        fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
+    } catch (error) {
+        console.error(`Error saving group data for ${chatId}: `, error);
+    }
+}
+
+/**
+ * Returns list of all tracked groups.
+ * @returns {Array<object>} List of group data objects
+ */
+function getAllGroups() {
+    const files = fs.readdirSync(GROUPS_DATA_DIR);
+    const groups = [];
+
+    for (const file of files) {
+        if (!file.endsWith('.json')) continue;
+        const filePath = path.join(GROUPS_DATA_DIR, file);
+        try {
+            const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+            groups.push(data);
+        } catch (e) {
+            console.error(`Error reading group file ${file}: `, e);
+        }
+    }
+    return groups;
+}
+
+/**
+ * Adds a message to group history.
+ * @param {string|number} chatId 
+ * @param {object} message { sender: string, content: string }
+ * @param {number} limit 
+ */
+function addGroupMessage(chatId, message, limit = 50) {
+    const data = loadGroupData(chatId);
+    data.recent_messages.push({
+        ...message,
+        timestamp: Date.now()
+    });
+
+    if (data.recent_messages.length > limit) {
+        data.recent_messages = data.recent_messages.slice(-limit);
+    }
+    saveGroupData(chatId, data);
 }
 
 module.exports = {
@@ -114,5 +198,9 @@ module.exports = {
     saveUserMemory,
     updateMemory,
     addToHistory,
-    findUserByUsername
+    findUserByUsername,
+    loadGroupData,
+    saveGroupData,
+    getAllGroups,
+    addGroupMessage
 };

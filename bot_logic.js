@@ -82,4 +82,34 @@ async function generateResponse(userMessage, memory, targetMemory = null) {
     }
 }
 
-module.exports = { generateResponse };
+
+
+/**
+ * Generates a summary of group conversations.
+ * @param {Array} messages List of message objects {sender: string, content: string}
+ * @returns {Promise<string>} Summary
+ */
+async function generateGroupSummary(messages) {
+    if (!messages || messages.length === 0) return "Сообщений нет.";
+
+    const msgsText = messages.map(m => `${m.sender}: ${m.content}`).join('\n');
+    const prompt = `
+Проанализируй последние сообщения в групповом чате и напиши краткую сводку (1-2 предложения): о чем говорят люди, есть ли интересные темы или конфликты.
+Сообщения:
+${msgsText}
+`;
+
+    try {
+        const completion = await client.chat.completions.create({
+            messages: [{ role: 'user', content: prompt }],
+            model: 'deepseek-chat',
+        });
+
+        return completion.choices[0].message.content;
+    } catch (error) {
+        console.error('DeepSeek Summary Error:', error);
+        return "Не удалось составить сводку.";
+    }
+}
+
+module.exports = { generateResponse, generateGroupSummary };
